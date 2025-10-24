@@ -292,17 +292,17 @@ async function renderMessageInstant(id, msg) {
     profilePic.style.objectFit = "cover";
     profilePic.style.cursor = "pointer";
     const profilePics = [
-        "/pfps/1.jpeg",
-        "/pfps/2.jpeg",
-        "/pfps/3.jpeg",
-        "/pfps/4.jpeg",
-        "/pfps/5.jpeg",
-        "/pfps/6.jpeg",
-        "/pfps/7.jpeg",
-        "/pfps/8.jpeg",
-        "/pfps/9.jpeg",
-        "/pfps/f3.jpeg",
-        "/pfps/kaiden.png"
+        "/chat-program/pfps/1.jpeg",
+        "/chat-program/pfps/2.jpeg",
+        "/chat-program/pfps/3.jpeg",
+        "/chat-program/pfps/4.jpeg",
+        "/chat-program/pfps/5.jpeg",
+        "/chat-program/pfps/6.jpeg",
+        "/chat-program/pfps/7.jpeg",
+        "/chat-program/pfps/8.jpeg",
+        "/chat-program/pfps/9.jpeg",
+        "/chat-program/pfps/f3.jpeg",
+        "/chat-program/pfps/kaiden.png"
     ];
     leftWrapper.appendChild(profilePic);
     leftWrapper.appendChild(nameSpan);
