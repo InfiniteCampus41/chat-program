@@ -27,7 +27,7 @@ async function loadUserProfile(username) {
     let foundUser = null;
     usersSnap.forEach((child) => {
       const data = child.val();
-      const displayName = data?.settings?.displayName;
+      const displayName = data?.profile?.displayName;
       if (displayName && displayName.toLowerCase() === username.toLowerCase()) {
         foundUser = { uid: child.key, ...data };
       }
@@ -38,20 +38,20 @@ async function loadUserProfile(username) {
     }
     const color = foundUser.settings?.color || "#ffffff";
     const bio = foundUser.profile?.bio || "No Bio Set.";
-    const displayName = foundUser.settings?.displayName || "(No Name)";
+    const displayName = foundUser.profile?.displayName || "(No Name)";
     const picValue = foundUser.profile?.pic ?? 0;
     const profileImages = [
-      "/chat-program/pfps/1.jpeg",
-      "/chat-program/pfps/2.jpeg",
-      "/chat-program/pfps/3.jpeg",
-      "/chat-program/pfps/4.jpeg",
-      "/chat-program/pfps/5.jpeg",
-      "/chat-program/pfps/6.jpeg",
-      "/chat-program/pfps/7.jpeg",
-      "/chat-program/pfps/8.jpeg",
-      "/chat-program/pfps/9.jpeg",
-      "/chat-program/pfps/f3.jpeg",
-      "/chat-program/pfps/kaiden.png"
+      "/pfps/1.jpeg",
+      "/pfps/2.jpeg",
+      "/pfps/3.jpeg",
+      "/pfps/4.jpeg",
+      "/pfps/5.jpeg",
+      "/pfps/6.jpeg",
+      "/pfps/7.jpeg",
+      "/pfps/8.jpeg",
+      "/pfps/9.jpeg",
+      "/pfps/f3.jpeg",
+      "/pfps/kaiden.png"
     ];
     const imgSrc = profileImages[picValue] || profileImages[0];
     loadingEl.style.display = "none";
