@@ -44,15 +44,11 @@ async function loadDisplayName(uid) {
 }
 function enableDisplayEditing() {
     displayNameInput.disabled = false;
-    displayNameInput.style.color = "black";
-    editDisplayBtn.style.background = "black";
     editDisplayBtn.style.display = "none";
     saveDisplayBtn.style.display = "inline";
-    saveDisplayBtn.style.background = "black";
     saveDisplayBtn.style.border = "1px solid white";
     saveDisplayBtn.style.borderRadius = "5px";
     cancelDisplayBtn.style.display = "inline";
-    cancelDisplayBtn.style.background = "black";
     cancelDisplayBtn.style.border = "1px solid white";
     cancelDisplayBtn.style.borderRadius = "5px";
     displayNameInput.focus();
@@ -187,9 +183,9 @@ function colorDistance(c1, c2) {
         Math.pow(c1[2] - c2[2], 2)
     );
 }
-const darkThreshold = 40;
+const darkThreshold = 100;
 const darkGray = hexToRgb("#121212");
-const lightGray = "#d3d3d3";
+const lightGray = "#555752";
 saveNameColorBtn.addEventListener("click", async () => {
     if (!currentUser) return;
     let color = nameColorInput.value || "#ffffff";
@@ -231,15 +227,11 @@ async function loadUserBio(uid) {
 }
 function enableBioEditing() {
     bioInput.disabled = false;
-    bioInput.style.color = "black";
     editBioBtn.style.display = "none";
-    editBioBtn.style.background = "black";
     saveBioBtn.style.display = "inline";
-    saveBioBtn.style.background = "black";
     saveBioBtn.style.border = "1px solid white";
     saveBioBtn.style.borderRadius = "5px";
     cancelBioBtn.style.display = "inline";
-    cancelBioBtn.style.background = "black";
     cancelBioBtn.style.border = "1px solid white";
     cancelBioBtn.style.borderRadius = "5px";
     bioInput.focus();
@@ -273,16 +265,8 @@ bioInput.addEventListener("input", () => {
     bioCharCount.textContent = `${bioInput.value.length} / 50`;
 });
 const profilePicBtn = document.createElement("button");
-profilePicBtn.className = "pbtn";
+profilePicBtn.className = "btn btn-secondary";
 profilePicBtn.textContent = "Loading Picture...";
-profilePicBtn.style.display = "block";
-profilePicBtn.style.marginTop = "10px";
-profilePicBtn.style.border = "1px solid white";
-profilePicBtn.style.borderRadius = "8px";
-profilePicBtn.style.padding = "10px";
-profilePicBtn.style.background = "black";
-profilePicBtn.style.color = "white";
-profilePicBtn.style.cursor = "pointer";
 const profileImages = [
     "/pfps/1.jpeg",
     "/pfps/2.jpeg",
@@ -294,9 +278,12 @@ const profileImages = [
     "/pfps/8.jpeg",
     "/pfps/9.jpeg",
     "/pfps/f3.jpeg",
-    "/pfps/kaiden.png"
+    "/pfps/kaiden.png",
+    "/pfps/10.jpeg",
+    "/pfps/11.jpeg",
+    "/pfps/12.jpeg"
 ];
-const restrictedPics = [6, 7, 8];
+const restrictedPics = [6, 7, 8, 9];
 let currentPicIndex = 0;
 function updateProfilePicButton() {
     const img = profileImages[currentPicIndex];
@@ -378,9 +365,7 @@ onAuthStateChanged(auth, async (user) => {
         await loadUserBio(user.uid);
         await loadUserProfilePic(user.uid);
         const profilePicContainer = document.getElementById("profileContainer");
-        if (profilePicContainer && !document.body.contains(profilePicBtn)) {
-            profilePicContainer.insertAdjacentElement("afterend", profilePicBtn);
-        }
+        profilePicContainer.appendChild(profilePicBtn);
         onValue(ref(db, `users/${user.uid}/profile`), snap => {
             if (snap.exists()) {
                 const profile = snap.val();

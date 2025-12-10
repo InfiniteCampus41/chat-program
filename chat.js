@@ -6,9 +6,11 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
 const channelList = document.getElementById("channels");
 const chatLog = document.getElementById("chatLog");
+let lastMessageTimestamp = 0;
+const MESSAGE_COOLDOWN = 3000;
 const mentionNotif = document.getElementById("mentionNotif");
-const mentionToggle = document.getElementById("mentionToggle");
 const mentionToggleLabel = document.getElementById("mentionToggleLabel");
+const mentionToggle = document.getElementById("mentionToggle");
 const chatInput = document.getElementById("chatInput");
 const sendBtn = document.getElementById("sendBtn");
 const adminControls = document.getElementById("adminControls");
@@ -16,6 +18,7 @@ const newChannelName = document.getElementById("newChannelName");
 const addChannelBtn = document.getElementById("addChannelBtn");
 const privateList = document.getElementById("privateList");
 const usernameSpan = document.getElementById("username");
+const bioSpan = document.getElementById("bio");
 const emailSpan = document.getElementById("email");
 const roleSpan = document.getElementById("role");
 let currentPath = null;
@@ -25,6 +28,9 @@ let currentUser = null;
 let currentName = "User";
 let currentColor = "#ffffff";
 let isAdmin = false;
+let isHAdmin = false;
+let isTester = false;
+let isCoOwner = false;
 let isOwner = false;
 let currentPrivateUid = null;
 let currentPrivateName = null;
@@ -32,29 +38,36 @@ let metadataListenerRef = null;
 let autoScrollEnabled = true;
 const privateListeners = new Set();
 const channelMentionSet = new Set();
+const mentionMenu = document.getElementById("mentionMenu");
+let allUsernames = [];
+let mentionActive = false;
+let triggerIndex = -1;
 const style = document.createElement("style");
 style.textContent = `
-.mention {
-  color: #4fa3ff;
-  font-weight: bold;
-  background: rgba(79,163,255,0.1);
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-.mention-self {
-  color: gold;
-  font-weight: bold;
-  background: rgba(255,215,0,0.15);
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-.notifDot {
-  color: red;
-  font-weight: bold;
-  margin-right: 6px;
-}
-.msg { margin: 6px 0; }
-.left { display:flex; align-items:center; gap:6px; }
+    .mention {
+        color: #4fa3ff;
+        font-weight: bold;
+        background: rgba(79,163,255,0.1);
+        padding: 2px 4px;
+        border-radius: 4px;
+    }
+    .mention-self {
+        color: gold;
+        font-weight: bold;
+        background: rgba(255,215,0,0.15);
+        padding: 2px 4px;
+        border-radius: 4px;
+    }
+    .notifDot {
+        color: red;
+        font-weight: bold;
+        margin-right: 6px;
+    }
+    .left { 
+        display:flex; 
+        align-items:center; 
+        gap:6px; 
+    }
 `;
 const typingIndicator = document.createElement("div");
 typingIndicator.id = "typingIndicator";
@@ -73,7 +86,7 @@ function showError(message) {
     errorDiv.textContent = message;
     Object.assign(errorDiv.style, {
         position: "fixed",
-        top: header ? `${header.offsetHeight + 10}px` : "10px",
+        top: "10px",
         left: "50%",
         transform: "translateX(-50%)",
         backgroundColor: "salmon",
@@ -110,32 +123,6 @@ function scrollToBottom(smooth = false) {
         }, 50);
     });
 }
-const clock = document.createElement("div");
-clock.id = "clock";
-clock.style.textAlign = "center";
-clock.style.marginTop = "-1%";
-const roleEl = document.getElementById("role");
-const header = document.getElementById("header");
-if (header && roleEl) {
-    header.style.position = "relative";
-    const roleRect = roleEl.getBoundingClientRect();
-    const headerRect = header.getBoundingClientRect();
-    const offsetTop = roleEl.offsetTop + roleEl.offsetHeight + 5;
-    header.appendChild(clock);
-}
-function updateClock() {
-    const now = new Date();
-    const hours = now.getHours();
-    const minutes = now.getMinutes();
-    const seconds = now.getSeconds();
-    const ampm = hours >= 12 ? 'PM' : 'AM';
-    const displayHour = hours % 12 || 12;
-    const displayMinute = minutes.toString().padStart(2, '0');
-    const displaySecond = seconds.toString().padStart(2, '0');
-    clock.textContent = `${displayHour}:${displayMinute}:${displaySecond} ${ampm}`;
-}
-updateClock();
-setInterval(updateClock, 100);
 async function muteUser(uid) {
     const muteRef = ref(db, `mutedUsers/${uid}`);
     const expireTime = Date.now() + 24 * 60 * 60 * 1000;
@@ -170,10 +157,9 @@ function detachCurrentMessageListeners() {
 async function ensureDisplayName(user) {
     const nameSnap = await get(ref(db, `users/${user.uid}/profile/displayName`));
     if (!nameSnap.exists()) {
-        const name = (user.email === "infinitecodehs@gmail.com") ? "hacker41 💎" : "User";
+        const name = (user.email === "infinitecodehs@gmail.com") ? "Hacker41 💎" : "User";
         await set(ref(db, `users/${user.uid}/profile/displayName`), name);
         currentName = name;
-        localStorage.setItem("displayName", name);
     } else {
         currentName = nameSnap.val();
         localStorage.setItem("displayName", currentName);
@@ -214,7 +200,9 @@ async function loadMentionSetting(user) {
 }
 async function getDisplayName(uid) {
     const snap = await get(ref(db, `users/${uid}/profile/displayName`));
-    return snap.exists() ? snap.val() : "User";
+    let dn = snap.exists() ? snap.val() : "User";
+    if (!dn || dn.trim() === "") dn = "Spam Account";
+    return dn;
 }
 mentionNotif.addEventListener("click", () => {
     const msgId = mentionNotif.dataset.msgid;
@@ -273,14 +261,13 @@ async function renderMessageInstant(id, msg) {
     div.id = "msg-" + id;
     div.dataset.timestamp = msg.timestamp || Date.now();
     const topRow = document.createElement("div");
-    topRow.style.display = "flex";
-    topRow.style.justifyContent = "space-between";
-    topRow.style.marginBottom = "2px";
+    topRow.id = "topRow";
     const nameSpan = document.createElement("span");
-    nameSpan.textContent = "User";
+    nameSpan.id = "msgName";
     nameSpan.className = "highlight";
     nameSpan.style.color = "#aaa";
     nameSpan.style.cursor = "pointer";
+    nameSpan.textContent = "User";
     const leftWrapper = document.createElement("span");
     leftWrapper.style.display = "flex";
     leftWrapper.style.gap = "6px";
@@ -302,7 +289,10 @@ async function renderMessageInstant(id, msg) {
         "/pfps/8.jpeg",
         "/pfps/9.jpeg",
         "/pfps/f3.jpeg",
-        "/pfps/kaiden.png"
+        "/pfps/kaiden.png",
+        "/pfps/10.jpeg",
+        "/pfps/11.jpeg",
+        "/pfps/12.jpeg"
     ];
     leftWrapper.appendChild(profilePic);
     leftWrapper.appendChild(nameSpan);
@@ -315,10 +305,16 @@ async function renderMessageInstant(id, msg) {
     textDiv.style.whiteSpace = "pre-wrap";
     textDiv.style.marginLeft = "40px";
     textDiv.style.marginTop = "-15px";
-    let safeText = (msg.text || "")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/\n/g, "<br>");
+    let safeText = (msg.text || "");
+    safeText = safeText
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    safeText = safeText.replace(
+        /&lt;i class="([^"]*(?:fa|bi)[^"]+)"&gt;&lt;\/i&gt;/g,
+        '<i class="$1"></i>'
+    );
+    safeText = safeText.replace(/\n/g, "<br>");
     const mentionRegex = /@([^\s<]+)/g;
     safeText = safeText.replace(mentionRegex, (match, name) => {
         const isSelfMention = currentName && (currentName.toLowerCase() === name.toLowerCase() ||
@@ -444,43 +440,59 @@ async function renderMessageInstant(id, msg) {
     });
     const editedSpan = document.createElement("div");
     editedSpan.className = "edited-label";
-    editedSpan.style.fontSize = "0.7em";
-    editedSpan.style.color = "#aaa";
-    editedSpan.style.marginTop = "2px";
-    editedSpan.style.marginLeft = "35px";
     editedSpan.textContent = msg.edited ? "(Edited)" : "";
     div.appendChild(topRow);
     div.appendChild(textDiv);
     div.appendChild(editedSpan);
     (async () => {
         try {
-            const [nameSnap, colorSnap, picSnap, badgeSnap, adminSnap, ownerSnap] = await Promise.all([
+            const [nameSnap, colorSnap, picSnap, badgeSnap, adminSnap, ownerSnap, coOwnerSnap, hAdminSnap, testerSnap, hSnap] = await Promise.all([
                 get(ref(db, `users/${msg.sender}/profile/displayName`)),
                 get(ref(db, `users/${msg.sender}/settings/color`)),
                 get(ref(db, `users/${msg.sender}/profile/pic`)),
                 get(ref(db, `users/${msg.sender}/settings/badgeText`)),
                 get(ref(db, `users/${msg.sender}/profile/isAdmin`)),
-                get(ref(db, `users/${msg.sender}/profile/isOwner`))
+                get(ref(db, `users/${msg.sender}/profile/isOwner`)),
+                get(ref(db, `users/${msg.sender}/profile/isCoOwner`)),
+                get(ref(db, `users/${msg.sender}/profile/isHAdmin`)),
+                get(ref(db, `users/${msg.sender}/profile/isTester`)),
+                get(ref(db, `users/${msg.sender}/profile/mileStone`))
             ]);
-            const displayName = nameSnap.exists() ? nameSnap.val() : "User";
+            let displayName = nameSnap.exists() ? nameSnap.val() : "User";
+            if (!displayName || displayName.trim() === "") {
+                displayName = "Spam Account";
+            }
             const color = colorSnap.exists() ? colorSnap.val() : "#4fa3ff";
-            const badgeText = badgeSnap.exists() ? badgeSnap.val() : null;
-            const picVal = picSnap.exists() ? picSnap.val() : 0;
-            const picIndex = (picVal >= 0 && picVal <= 10) ? picVal : 0;
-            profilePic.src = profilePics[picIndex];
+            let badgeText = null;
             const senderIsAdmin = adminSnap.exists() ? adminSnap.val() : false;
+            const senderIsCoOwner = coOwnerSnap.exists() ? coOwnerSnap.val() : false;
             const senderIsOwner = ownerSnap.exists() ? ownerSnap.val() : false;
+            const senderIsHAdmin = hAdminSnap.exists() ? hAdminSnap.val() : false;
+            const senderIsTester = testerSnap.exists() ? testerSnap.val() : false;
+            const senderIsHUser = hSnap.exists() ? hSnap.val() : false;
+            if (senderIsOwner) badgeText = "⛨";
+            else if (senderIsHAdmin) badgeText = "⧨";
+            else if (senderIsCoOwner) badgeText = "⛊";
+            else if (senderIsAdmin) badgeText = "⛉";
+            else if (senderIsTester) badgeText = "TSTR";
+            else if (senderIsHUser) badgeText = "100";
+            if (badgeSnap.exists() && badgeSnap.val().trim() !== "") {
+                badgeText = badgeSnap.val();
+            }
+            const picVal = picSnap.exists() ? picSnap.val() : 0;
+            const picIndex = (picVal >= 0 && picVal <= 13) ? picVal : 0;
+            profilePic.src = profilePics[picIndex];
             nameSpan.textContent = displayName;
             nameSpan.style.color = color;
             const openProfile = () => {
                 const cleanName = encodeURIComponent(displayName.replace(/ /g, ""));
-                window.location.href = `profile.html?user=${cleanName}`;
+                window.location.href = `profile.html?user=${msg.sender}`;
             };
             nameSpan.onclick = openProfile;
             profilePic.onclick = openProfile;
             nameSpan.textContent = displayName;
             nameSpan.style.color = color;
-            if (isOwner && !senderIsOwner) {
+            if ((isOwner || isCoOwner || isHAdmin || isTester) && !senderIsOwner) {
                 nameSpan.addEventListener("contextmenu", async (e) => {
                     e.preventDefault();
                     const alreadyMuted = await isUserMuted(msg.sender);
@@ -495,40 +507,142 @@ async function renderMessageInstant(id, msg) {
                     menu.style.color = "#fff";
                     menu.style.cursor = "pointer";
                     menu.style.zIndex = 9999;
-                    menu.textContent = alreadyMuted ? "Unmute User" : "Mute For 1 Day";
+                    if (alreadyMuted) {
+                        menu.textContent = "Unmute User";
+                        menu.onclick = async () => {
+                            await unmuteUser(msg.sender);
+                            closeMenu();
+                        };
+                    } else {
+                        menu.textContent = "Mute User";
+                        const options = document.createElement("div");
+                        options.style.display = "flex";
+                        options.style.flexDirection = "column";
+                        options.style.marginTop = "4px";
+                        const muteToggle = document.createElement('div');
+                        muteToggle.textContent = "Toggle";
+                        muteToggle.style.cursor = "pointer";
+                        muteToggle.onclick = async () => {
+                            const muteRef = ref(db, `mutedUsers/${msg.sender}`);
+                            const expireTime = "Never";
+                            await set(muteRef, { expires: expireTime });
+                            showSuccess(`User Muted`);
+                            closeMenu();
+                        };
+                        const muteMinutes = document.createElement("div");
+                        muteMinutes.textContent = "Minutes";
+                        muteMinutes.style.cursor = "pointer";
+                        muteMinutes.onclick = async () => {
+                            let minutes = prompt("Mute For How Many Minutes?", "5");
+                            minutes = parseInt(minutes);
+                            if (!isNaN(minutes) && minutes > 0) {
+                                const muteRef = ref(db, `mutedUsers/${msg.sender}`);
+                                const expireTime = Date.now() + minutes * 60 * 1000;
+                                await set(muteRef, { expires: expireTime });
+                                showSuccess(`User Muted For ${minutes} Minute(s).`);
+                            } else {
+                                showError("Invalid Duration Entered.");
+                            }
+                            closeMenu();
+                        };
+                        const muteHours = document.createElement("div");
+                        muteHours.textContent = "Hours";
+                        muteHours.style.cursor = "pointer";
+                        muteHours.onclick = async () => {
+                            let hours = prompt("Mute For How Many Hours?", "1");
+                            hours = parseInt(hours);
+                            if (!isNaN(hours) && hours > 0) {
+                                const muteRef = ref(db, `mutedUsers/${msg.sender}`);
+                                const expireTime = Date.now() + hours * 60 * 60 * 1000;
+                                await set(muteRef, { expires: expireTime });
+                                showSuccess(`User Muted For ${hours} Hour(s).`);
+                            } else {
+                                showError("Invalid Duration Entered.");
+                            }
+                            closeMenu();
+                        };
+                        const muteDays = document.createElement("div");
+                        muteDays.textContent = "Days";
+                        muteDays.style.cursor = "pointer";
+                        muteDays.onclick = async () => {
+                            let days = prompt("Mute For How Many Days?", "1");
+                            days = parseInt(days);
+                            if (!isNaN(days) && days > 0) {
+                                const muteRef = ref(db, `mutedUsers/${msg.sender}`);
+                                const expireTime = Date.now() + days * 24 * 60 * 60 * 1000;
+                                await set(muteRef, { expires: expireTime });
+                                showSuccess(`User Muted For ${days} Day(s).`);
+                            } else {
+                                showError("Invalid Duration Entered.");
+                            }
+                            closeMenu();
+                        };
+                        options.appendChild(muteToggle);
+                        options.appendChild(muteMinutes);
+                        options.appendChild(muteHours);
+                        options.appendChild(muteDays);
+                        menu.appendChild(options);
+                    }
                     document.body.appendChild(menu);
                     const closeMenu = () => { menu.remove(); document.removeEventListener("click", closeMenu); };
                     document.addEventListener("click", closeMenu);
-                    menu.addEventListener("click", async () => {
-                        if (alreadyMuted) await unmuteUser(msg.sender);
-                        else await muteUser(msg.sender);
-                        closeMenu();
-                    });
                 });
             }
             if (badgeText) {
                 const badgeSpan = document.createElement("span");
-                badgeSpan.textContent = `| ${badgeText} |`;
+                badgeSpan.textContent = `${badgeText}`;
                 badgeSpan.style.marginLeft = "6px";
                 badgeSpan.style.fontWeight = "bold";
-                if (badgeText === "Co-Owner") badgeSpan.style.color = "lightblue";
-                else if (badgeText === "Tester") badgeSpan.style.color = "darkgoldenrod";
-                else if (senderIsAdmin) badgeSpan.style.color = "blue";
-                else badgeSpan.style.color = "lime";
+                if (badgeText === "⛨") {
+                    badgeSpan.innerHTML = '<i class="bi bi-shield-plus">';
+                    badgeSpan.style.color = "lime";
+                    badgeSpan.title = "Owner";
+                } else if (badgeText ==="⧨") {
+                    badgeSpan.innerHTML = '<i class="fa-solid fa-shield-halved"></i>';
+                    badgeSpan.style.color = "#00cc99";
+                    badgeSpan.title = "Head Admin";
+                } else if (badgeText === "⛊") {
+                    badgeSpan.innerHTML = '<i class="bi bi-shield-fill"></i>';
+                    badgeSpan.style.color = "lightblue";
+                    badgeSpan.title = "Co-Owner";
+                } else if (badgeText === "⛉") {
+                    badgeSpan.innerHTML = '<i class="bi bi-shield"></i>';
+                    badgeSpan.style.color = "dodgerblue";
+                    badgeSpan.title = "Admin";
+                } else if (badgeText === "TSTR") {
+                    badgeSpan.innerHTML = '<i class="fa-solid fa-cogs"></i>';
+                    badgeSpan.style.color = "DarkGoldenRod";
+                    badgeSpan.title = "Tester";
+                } else if (badgeText === "100") {
+                    badgeSpan.innerHTML = '<i class="bi bi-award"></i>';
+                    badgeSpan.style.color = "yellow";
+                    badgeSpan.title = "This User Is The 100Th Signed Up User";
+                } else {
+                    badgeSpan.innerHTML = '<i class="bi bi-shield-exclamation"></i>';
+                    badgeSpan.style.color = "red";
+                    badgeSpan.title = "Spam User";
+                }
                 leftWrapper.appendChild(badgeSpan);
             }
             const isSelf = msg.sender === currentUser.uid;
-            if (isSelf || isOwner || isAdmin) {
+            if (isSelf || isOwner || isAdmin || isCoOwner || isHAdmin || isTester) {
                 let canDelete = false;
-                if (isSelf || isOwner) canDelete = true;
-                else if (isAdmin && !senderIsAdmin && !senderIsOwner) canDelete = true;
+                if (isSelf) canDelete = true;
+                else if (isOwner || isTester) canDelete = true;
+                else if (isCoOwner && !senderIsOwner && !senderIsTester && !senderIsCoOwner && !senderIsOwner) canDelete = true;
+                else if (isHAdmin && !senderIsOwner && !senderIsCoOwner && !senderIsTester && !senderIsHAdmin) canDelete = true;
+                else if (isAdmin && !senderIsHAdmin && !senderIsAdmin && !senderIsCoOwner && !senderIsOwner && senderIsTester) canDelete = true;
+                let canEdit = false;
+                if (isSelf) canEdit = true;
+                else if (isOwner || isTester) canEdit = true;
+                else if (isCoOwner && !senderIsOwner && !senderIsTester && !senderIsCoOwner) canEdit = true;
                 if (canDelete) {
                     const delBtn = document.createElement("button");
                     delBtn.textContent = "Delete";
                     delBtn.onclick = () => remove(ref(db, currentPath + "/" + id));
                     div.appendChild(delBtn);
                 }
-                if (isSelf || isOwner) {
+                if (canEdit) {
                     const editBtn = document.createElement("button");
                     editBtn.textContent = "Edit";
                     editBtn.onclick = () => {
@@ -559,7 +673,7 @@ async function renderMessageInstant(id, msg) {
                             if (e.key === "Enter" && !e.shiftKey) {
                                 e.preventDefault();
                                 const newText = textarea.value.trim();
-                                if (newText.length > 1000) {
+                                if (newText.length > 1000 && !(isCoOwner || isOwner || isHAdmin || isTester)) {
                                     showError(`Your Edited Message Is Too Long (${newText.length} Characters). Please Keep It Under 1000.`);
                                     textarea.value = "";
                                     return;
@@ -621,6 +735,21 @@ async function renderMessageInstant(id, msg) {
     }
     return div;
 }
+async function cleanExpiredMutes() {
+    const mutedRef = ref(db, 'mutedUsers');
+    const snap = await get(mutedRef);
+    if (!snap.exists()) return;
+    const allMutes = snap.val();
+    for (const uid in allMutes) {
+        const data = allMutes[uid];
+        if (data.expires && Date.now() > data.expires) {
+            await remove(ref(db, `mutedUsers/${uid}`));
+            console.log(`Expired Mute For ${uid} Removed`);
+        }
+    }
+}
+cleanExpiredMutes();
+setInterval(cleanExpiredMutes, 1000);
 async function attachMessageListeners(msgRef) {
     detachCurrentMessageListeners();
     currentMsgRef = msgRef;
@@ -669,10 +798,17 @@ async function attachMessageListeners(msgRef) {
         if (el) {
             const textDiv = el.querySelector("div:nth-child(2)");
             const editedSpan = el.querySelector(".edited-label");
-            let safeText = (snap.val().text || "")
+            const updatedMsg = snap.val();
+            let safeText = (updatedMsg.text || "");
+            safeText = safeText
+                .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
-                .replace(/>/g, "&gt;")
-                .replace(/\n/g, "<br>");
+                .replace(/>/g, "&gt;");
+            safeText = safeText.replace(
+                /&lt;i class="([^"]*(?:fa|bi)[^"]+)"&gt;&lt;\/i&gt;/g,
+                '<i class="$1"></i>'
+            );
+            safeText = safeText.replace(/\n/g, "<br>");
             const mentionRegex = /@([^\s<]+)/g;
             safeText = safeText.replace(mentionRegex, (match, name) => {
                 const isSelfMention = currentName && (currentName.toLowerCase() === name.toLowerCase() ||
@@ -809,13 +945,13 @@ async function renderChannelsFromDB() {
     }
     const keys = Object.keys(chans).sort();
     keys.forEach(ch => {
-        if (isRestrictedChannel(ch) && !(isAdmin || isOwner)) return;
+        if (isRestrictedChannel(ch) && !(isAdmin || isOwner || isCoOwner || isHAdmin || isTester)) return;
         const li = document.createElement("li");
         const textNode = document.createTextNode("" + ch);
         li.appendChild(textNode);
         li.onclick = () => { currentPrivateUid = null; switchChannel(ch); };
         if (!currentPrivateUid && currentPath === `messages/${ch}`) li.classList.add("active");
-        if ((isOwner || currentUser.email === "infinitecodehs@gmail.com") && ch !== "General") {
+        if ((isOwner || isCoOwner || isTester) && ch !== "General") {
             const btnWrap = document.createElement("span");
             btnWrap.style.marginLeft = "10px";
             const renameBtn = document.createElement("button");
@@ -856,7 +992,7 @@ async function renderChannelsFromDB() {
         }
         channelList.appendChild(li);
     });
-    if (isOwner || currentUser.email === "infinitecodehs@gmail.com") {
+    if (isOwner || isCoOwner || isTester) {
         newChannelName.style.display = "inline-block";
         addChannelBtn.style.display = "inline-block";
     } else {
@@ -865,7 +1001,7 @@ async function renderChannelsFromDB() {
     }
 }
 function switchChannel(ch) {
-    if (isRestrictedChannel(ch) && !(isAdmin || isOwner)) {
+    if (isRestrictedChannel(ch) && !(isAdmin || isOwner || isCoOwner || isHAdmin || isTester)) {
         showError("You Don't Have Permission To Access That Channel.");
         ch = "General";
     }
@@ -873,7 +1009,7 @@ function switchChannel(ch) {
     currentPrivateName = null;
     chatLog.innerHTML = "";
     currentPath = `messages/${ch}`;
-    if (isRestrictedChannel(ch) && !(isAdmin || isOwner)) {
+    if (isRestrictedChannel(ch) && !(isAdmin || isOwner || isCoOwner || isHAdmin || isTester)) {
         return;
     } else {
         attachMessageListeners(ref(db, currentPath));
@@ -917,13 +1053,21 @@ sendBtn.onclick = async () => {
     if (muted) {
         return;
     }
+    if (!isAdmin  && !isHAdmin && !isOwner && !isCoOwner && !isTester) {
+    const now = Date.now();
+    if (now - lastMessageTimestamp < MESSAGE_COOLDOWN) {
+        showError("You Can Only Send A Message Every 3 Seconds.");
+        return;
+    }
+    lastMessageTimestamp = now;
+}
     const mentions = trimmed.match(/@\w+/g);
     if (mentions && mentions.length > 1) {
         showError("Only One Mention Per Message Is Allowed.");
         chatInput.value = "";
         return;
     }
-    if (trimmed.length > 1000) {
+    if (trimmed.length > 1000 && !(isCoOwner || isOwner || isHAdmin || isTester)) {
         showError(`Your Message Is Too Long (${trimmed.length} Characters). Please Keep It Under 1000.`);
         chatInput.value = "";
         return;
@@ -934,7 +1078,7 @@ sendBtn.onclick = async () => {
         await set(emailRef, currentUser.email);
     }
     let outgoingText = text;
-    outgoingText = outgoingText.replace(/@hacker41(\b(?!\s*💎))/gi, "@hacker41 💎");
+    outgoingText = outgoingText.replace(/@Hacker41(\b(?!\s*💎))/gi, "@Hacker41 💎");
     const msg = {
         sender: currentUser.uid,
         text: outgoingText,
@@ -943,7 +1087,7 @@ sendBtn.onclick = async () => {
     if (currentPrivateUid) {
         await sendPrivateMessage(currentPrivateUid, outgoingText);
     } else {
-        if (currentPath === "messages/Admin-Chat" && !(isAdmin || isOwner)) {
+        if (currentPath === "messages/Admin-Chat" && !(isAdmin || isOwner || isCoOwner || isHAdmin || isTester)) {
             showError("You Cannot Send Messages To Admin Chat.");
             chatInput.value = "";
             return;
@@ -955,7 +1099,6 @@ sendBtn.onclick = async () => {
     const channelName = currentPath.split("/")[1];
     remove(ref(db, `typing/${channelName}/${currentUser.uid}`));
 }
-
 };
 chatInput.addEventListener("input", () => {
     const mentions = chatInput.value.match(/@\w+/g);
@@ -1035,51 +1178,33 @@ chatInput.addEventListener("input", () => {
 chatInput.addEventListener("blur", () => {
     mentionHint.style.display = "none";
 });
-function setHeader(user, name) {
-    usernameSpan.textContent = name;
-    usernameSpan.style.color = currentColor;
-    emailSpan.textContent = user.email;
-    if (isOwner || user.email === "infinitecodehs@gmail.com") {
-        roleSpan.textContent = "Owner"; roleSpan.className = "role-owner";
-        roleSpan.style.color = "lime";
-    } else if(["nitrix118@gmail.com"].includes(user.email)) {
-        roleSpan.textContent = "Co-Owner"; roleSpan.className = "role-cOwner";
-        roleSpan.style.color = "lightblue";
-    } else if (["jonloomis2000@gmail.com", "cegmnops@icloud.com", "larrytrejo200@gmail.com", "2030kallison@johnstonschools.org"].includes(user.email)) {
-        roleSpan.textContent = "Admin"; roleSpan.className = "role-admin";
-        roleSpan.style.color = "blue";
-    } else if(user.email === "newsomr95@gmail.com") {
-        roleSpan.textContent = "Tester"; roleSpan.className = "role-test";
-        roleSpan.style.color = "darkgoldenrod";
-    } else {
-        roleSpan.textContent = "User"; roleSpan.className = "role-user";
-        roleSpan.style.color = "white";
-    }
-}
 onAuthStateChanged(auth, async user => {
     if (!user) { 
         showError("Not Logged In!"); 
         setTimeout(() => location.href = "login.html", 1000);
         return; 
     }
+    const adminSnap = await get(ref(db, `users/${user.uid}/profile/isAdmin`));
+    const coOwnerSnap = await get(ref(db, `users/${user.uid}/profile/isCoOwner`));
+    const hAdminSnap = await get(ref(db, `users/${user.uid}/profile/isHAdmin`));
+    const testerSnap = await get(ref(db, `users/${user.uid}/profile/isTester`));
     currentUser = user;
     const ownerSnap = await get(ref(db, `users/${user.uid}/profile/isOwner`));
     isOwner = ownerSnap.exists() && ownerSnap.val() === true;
     if (user.email === "infinitecodehs@gmail.com") isOwner = true;
-    isAdmin = ["infinitecodehs@gmail.com", "nitrix118@gmail.com", "jonloomis2000@gmail.com",
-               "newsomr95@gmail.com", "cegmnops@icloud.com", "larrytrejo200@gmail.com", "2030kallison@johnstonschools.org"]
-               .includes(user.email);
-    adminControls.style.display = (isAdmin || isOwner) ? "block" : "none";
-    if (isAdmin && !isOwner) {
-        newChannelName.style.display = "none";
-        addChannelBtn.style.display = "none";
-    }
+    isCoOwner = coOwnerSnap.exists() ? coOwnerSnap.val() : false;
+    isAdmin = adminSnap.exists() ? adminSnap.val() : false;
+    isHAdmin = hAdminSnap.exists() ? hAdminSnap.val() : false;
+    isTester = testerSnap.exists() ? testerSnap.val() : false;
+    adminControls.style.display = (isAdmin || isOwner || isCoOwner || isHAdmin || isTester) ? "block" : "none";
+    newChannelName.style.display = (isCoOwner || isOwner || isTester) ? "inline-block" : "none";
+    addChannelBtn.style.display = (isCoOwner || isOwner || isTester) ? "inline-block" : "none";
     await ensureDisplayName(user);
     await loadMentionSetting(user);
-    setHeader(user, currentName);
+    await loadAllUsernames(); 
     startChannelListeners();
     await renderChannelsFromDB();
-    if (currentPath && currentPath.includes("messages/Admin-Chat") && !(isAdmin || isOwner)) {
+    if (currentPath && currentPath.includes("messages/Admin-Chat") && !(isAdmin || isOwner || isCoOwner || isHAdmin || isTester)) {
         switchChannel("General");
     }
     if (!currentPath) switchChannel("General");
@@ -1093,9 +1218,52 @@ onAuthStateChanged(auth, async user => {
         });
         localStorage.removeItem("openPrivateChatUid");
     }
+    const nameSnap = await get(ref(db, `users/${user.uid}/profile/displayName`));
+    const bioSnap = await get(ref(db, `users/${user.uid}/profile/bio`));
+    const bioDisplay = bioSnap.exists() ? bioSnap.val() : `Bio Not Set`;
+    let displayName = nameSnap.exists() ? nameSnap.val() : user.email;
+    if (!displayName || displayName.trim() === "") {
+        displayName = "Spam Account";
+    }
+    const nameColor = await get(ref(db, `users/${user.uid}/settings/color`));
+    const DNC = nameColor.exists() ? nameColor.val() : `#ffffff`;
+    isAdmin = adminSnap.exists() ? adminSnap.val() : false;
+    isOwner = ownerSnap.exists() ? ownerSnap.val() : false;
+    isHAdmin = hAdminSnap.exists() ? hAdminSnap.val() : false;
+    isTester = testerSnap.exists() ? testerSnap.val() : false;
+    roleSpan.textContent = isOwner ? "Owner" : (isAdmin ? "Admin" : (isCoOwner ? "Co-Owner" : (isHAdmin ? "Head Admin" : (isTester ? "Tester" : "User"))));
+    roleSpan.style.color = isOwner ? "lime" : (isAdmin ? "dodgerblue" : (isCoOwner ? "lightblue" : (isHAdmin ? "#00cc99" : (isTester ? "darkGoldenRod" : "white"))));
+    bioSpan.textContent = bioDisplay;
+    bioSpan.style.color = "gray";
+    bioSpan.style.fontSize = "60%";
+    usernameSpan.textContent = displayName;
+    usernameSpan.style.color = DNC;
+    const pfpSnap = await get(ref(db, `users/${user.uid}/profile/pic`));
+    const pfpIndex = pfpSnap.exists() ? pfpSnap.val() : 0;
+    const profilePics = [
+        "/pfps/1.jpeg","/pfps/2.jpeg","/pfps/3.jpeg","/pfps/4.jpeg",
+        "/pfps/5.jpeg","/pfps/6.jpeg","/pfps/7.jpeg","/pfps/8.jpeg",
+        "/pfps/9.jpeg","/pfps/f3.jpeg","/pfps/kaiden.png", "/pfps/10.jpeg", "/pfps/11.jpeg", "/pfps/12.jpeg"
+    ];
+    const sidebarPfp = document.getElementById("sidebarPfp");
+    if (sidebarPfp) {
+        sidebarPfp.src = profilePics[pfpIndex];
+    }
 });
+async function loadAllUsernames() {
+    const usersSnap = await get(ref(db, "users"));
+    allUsernames = [];
+    if (usersSnap.exists()) {
+        const data = usersSnap.val();
+        for (const uid of Object.keys(data)) {
+            if (data[uid].profile && data[uid].profile.displayName) {
+                allUsernames.push(data[uid].profile.displayName);
+            }
+        }
+    }
+}
 addChannelBtn.onclick = async () => {
-    if (!(isOwner || currentUser.email === "infinitecodehs@gmail.com")) return;
+    if (!(isOwner || isCoOwner || isTester || currentUser.email === "infinitecodehs@gmail.com")) return;
     const name = newChannelName.value.trim();
     if (!name) return;
     await set(ref(db, `channels/${name}`), true);
@@ -1111,6 +1279,61 @@ chatInput.addEventListener("paste", (e) => {
         }
     }
 });
+chatInput.addEventListener("input", () => {
+    const value = chatInput.value;
+    const cursorPos = chatInput.selectionStart;
+    const lastAt = value.lastIndexOf("@", cursorPos - 1);
+    if (lastAt === -1) {
+        mentionMenu.style.display = "none";
+        mentionActive = false;
+        return;
+    }
+    mentionActive = true;
+    triggerIndex = lastAt;
+    const typed = value.slice(lastAt + 1, cursorPos).toLowerCase();
+    const matches = allUsernames.filter(name =>
+        name.toLowerCase().startsWith(typed)
+    );
+    if (matches.length === 0) {
+        mentionMenu.style.display = "none";
+        return;
+    }
+    renderMentionMenu(matches);
+});
+function renderMentionMenu(names) {
+    mentionMenu.innerHTML = "";
+    names.forEach(name => {
+        const item = document.createElement("div");
+        item.textContent = name;
+        item.style.padding = "5px 8px";
+        item.style.cursor = "pointer";
+        item.style.borderBottom = "1px solid #333";
+        item.onmouseenter = () => item.style.background = "#333";
+        item.onmouseleave = () => item.style.background = "transparent";
+        item.onclick = () => {
+            autocompleteMention(name);
+        };
+        mentionMenu.appendChild(item);
+    });
+    mentionMenu.style.display = "flex";
+}
+function autocompleteMention(name) {
+    const value = chatInput.value;
+    const before = value.slice(0, triggerIndex);
+    const after = value.slice(chatInput.selectionStart);
+    chatInput.value = before + "@" + name + " " + after;
+    mentionMenu.style.display = "none";
+    mentionActive = false;
+    const pos = (before + "@" + name + " ").length;
+    chatInput.setSelectionRange(pos, pos);
+    chatInput.focus();
+}
+document.addEventListener("click", (e) => {
+    if (!mentionMenu.contains(e.target) && e.target !== chatInput) {
+        mentionMenu.style.display = "none";
+        mentionActive = false;
+    }
+});
 let currentSuccessDiv = null;
 function showSuccess(message) {
     if (currentSuccessDiv) currentSuccessDiv.remove();
@@ -1118,7 +1341,7 @@ function showSuccess(message) {
     successDiv.textContent = message;
     Object.assign(successDiv.style, {
         position: "fixed",
-        top: header ? `${header.offsetHeight + 10}px` : "10px",
+        top: "10px",
         left: "50%",
         transform: "translateX(-50%)",
         backgroundColor: "seagreen",

@@ -1,408 +1,236 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <title>Admin Panel</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      display: flex;
-      background: #121212;
-      color: white;
-      height: 100vh;
-      margin: 0;
-    }
+    <head>
+        <title>
+            Admin Panel
+        </title>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="icon" type="image/png" href="favicon.ico">
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+        <style>
+            * {
+                scrollbar-width: thin;
+                scrollbar-color: #555 transparent;
+            }
+            ::-webkit-scrollbar {
+                width: 8px;
+            }
+            ::-webkit-scrollbar-track {
+                background: transparent !important;
+            }
+            ::-webkit-scrollbar-thumb {
+                background: #555 !important;
+                border-radius: 10px;
+            }
+            body {
+                padding-right: 350px;
+                margin: 0;
+                background: #121212;
+                color: #fff;
+                height: 100vh;
+                overflow: hidden;
+                display: flex;
+            }
+            #typingContainer {
+                min-width:500px !important;
+            }
+            #left {
+                flex: 2;
+                background: #1a1a1a;
+                height: 100vh;
+                overflow-y: auto;
+                border-right: 1px solid #2a2a2a;
+                padding: 20px;
+            }
+            #right {
+                width: 350px;
+                background: #1f1f1f;
+                height: 100vh;
+                position: fixed;
+                right: 0;
+                top: 0;
+                padding: 20px;
+                overflow-y: auto;
+                border-left: 1px solid #2a2a2a;
+                z-index: 900;
+                transition: none;
+            }
+            #right.open {
+                right: 0;
+            }
+            #rightToggleBtn {
+                display: none;
+            }
+            #rightToggleBtn:hover {
+                background: #3a3a3a;
+            }
+            .message {
+                display: flex;
+                gap: 10px;
+                background: #1f1f1f;
+                border-radius: 8px;
+                padding: 12px;
+                margin-bottom: 12px;
+            }
 
-    #left, #right {
-      padding: 20px;
-      overflow-y: auto;
-    }
-
-    #left {
-      flex: 2;
-      border-right: 1px solid #333;
-    }
-
-    #right {
-      flex: 1;
-    }
-
-    button {
-      background: #444;
-      color: white;
-      border: none;
-      padding: 8px 12px;
-      margin: 4px;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-
-    button:hover {
-      background: #666;
-    }
-
-    .user-item {
-      cursor: pointer;
-      margin: 5px 0;
-      padding: 5px;
-      border-radius: 5px;
-      background: #1e1e1e;
-    }
-
-    .user-item:hover {
-      background: #333;
-    }
-
-    .message {
-      display: flex;
-      align-items: flex-start;
-      margin-bottom: 12px;
-      background: #1e1e1e;
-      padding: 10px;
-      border-radius: 8px;
-    }
-
-    .message img {
-      width: 40px;
-      height: 40px;
-      border-radius: 50%;
-      margin-right: 10px;
-      object-fit: cover;
-    }
-
-    .msg-content {
-      flex: 1;
-    }
-
-    .msg-header {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.85em;
-      color: #aaa;
-    }
-
-    .msg-text {
-      margin-top: 4px;
-      color: white;
-    }
-
-    .msg-edited {
-      font-size: 0.75em;
-      color: #999;
-      margin-top: 4px;
-    }
-
-    textarea {
-      width: 100%;
-      height: 300px;
-      background: #1e1e1e;
-      color: white;
-      border: 1px solid #444;
-      border-radius: 6px;
-      padding: 10px;
-    }
-  </style>
-</head>
-<body>
-  <div id="left">
-    <h2>Messages Mod View</h2>
-    <div id="privateChats"></div>
-    <div id="chatView" style="display:none;">
-      <h3 id="chatTitle"></h3>
-      <div id="chatMessages"></div>
-      <button id="deleteChat">Delete Chat</button>
-      <button id="backButton">Back</button>
-    </div>
-  </div>
-
-  <div id="right">
-    <h2>Users</h2>
-    <div id="userList"></div>
-    <div id="userEdit" style="display:none;">
-      <h3 id="editTitle"></h3>
-      <textarea id="userData"></textarea>
-      <button id="saveUser">Save Changes</button>
-      <button id="backToList">Back</button>
-    </div>
-  </div>
-
-  <script type="module">
-    import { auth, db } from "./firebase.js";
-    import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-auth.js";
-    import { ref, get, set, remove } from "https://www.gstatic.com/firebasejs/12.3.0/firebase-database.js";
-
-    const privateChatsDiv = document.getElementById("privateChats");
-    const chatView = document.getElementById("chatView");
-    const chatTitle = document.getElementById("chatTitle");
-    const chatMessages = document.getElementById("chatMessages");
-    const deleteChatBtn = document.getElementById("deleteChat");
-    const backButton = document.getElementById("backButton");
-
-    const userListDiv = document.getElementById("userList");
-    const userEditDiv = document.getElementById("userEdit");
-    const editTitle = document.getElementById("editTitle");
-    const userDataTextarea = document.getElementById("userData");
-    const saveUserBtn = document.getElementById("saveUser");
-    const backToListBtn = document.getElementById("backToList");
-
-    let currentChatPath = null;
-    let currentUserEditUID = null;
-    let userProfiles = {}; // uid -> { displayName, pic }
-
-    // Profile picture index → URL map
-    const profilePics = [
-      "/pfps/1.jpeg",
-      "/pfps/2.jpeg",
-      "/pfps/3.jpeg",
-      "/pfps/4.jpeg",
-      "/pfps/5.jpeg",
-      "/pfps/6.jpeg",
-      "/pfps/7.jpeg",
-      "/pfps/8.jpeg",
-      "/pfps/9.jpeg",
-      "/pfps/f3.jpeg",
-      "/pfps/kaiden.png"
-    ];
-
-    onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        alert("You must be logged in to view this page.");
-        window.location.href = "index.html";
-        return;
-      }
-
-      const uid = user.uid;
-      const ownerRef = ref(db, `users/${uid}/profile/isOwner`);
-      const snapshot = await get(ownerRef);
-
-      if (!snapshot.exists() || snapshot.val() !== true) {
-        alert("Access denied. You are not an owner.");
-        window.location.href = "index.html";
-        return;
-      }
-
-      await loadUserList();
-      await loadPrivateChats();
-    });
-
-    async function loadPrivateChats() {
-      privateChatsDiv.innerHTML = "Loading messages";
-      const privateRef = ref(db, "private");
-      const snapshot = await get(privateRef);
-      if (!snapshot.exists()) {
-        privateChatsDiv.innerHTML = "No messages found.";
-        return;
-      }
-
-      const data = snapshot.val();
-      privateChatsDiv.innerHTML = "";
-
-      Object.entries(data).forEach(([uid, chatPartners]) => {
-        const userDisplay = userProfiles[uid]?.displayName || uid;
-        const userDiv = document.createElement("div");
-        userDiv.innerHTML = `<strong>${userDisplay}</strong>`;
-        privateChatsDiv.appendChild(userDiv);
-
-        Object.keys(chatPartners).forEach(secondUid => {
-          const partnerName = userProfiles[secondUid]?.displayName || secondUid;
-          const div = document.createElement("div");
-          div.className = "user-item";
-          div.textContent = `Chat between ${userDisplay} & ${partnerName}`;
-          div.onclick = () => viewPrivateChat(uid, secondUid, userDisplay, partnerName);
-          privateChatsDiv.appendChild(div);
-        });
-      });
-    }
-
-    async function viewPrivateChat(uid, secondUid, userDisplay, partnerDisplay) {
-  currentChatPath = `private/${uid}/${secondUid}`;
-  privateChatsDiv.style.display = "none";
-  chatView.style.display = "block";
-  chatTitle.textContent = `Private Chat: ${userDisplay} & ${partnerDisplay}`;
-  chatMessages.innerHTML = "Loading...";
-
-  const chatRef = ref(db, currentChatPath);
-  const snapshot = await get(chatRef);
-  if (!snapshot.exists()) {
-    chatMessages.innerHTML = "<p>No messages found.</p>";
-    return;
-  }
-
-  const messages = snapshot.val();
-  chatMessages.innerHTML = "";
-
-  for (const [msgId, msgData] of Object.entries(messages)) {
-    const senderUid = msgData.sender || uid;
-
-    // Fetch sender profile if not cached
-    if (!userProfiles[senderUid]) {
-      const userSnap = await get(ref(db, `users/${senderUid}/profile`));
-      const profile = userSnap.exists() ? userSnap.val() : {};
-      userProfiles[senderUid] = {
-        displayName: profile.displayName || "Unknown",
-        pic: profile.pic || ""
-      };
-    }
-    const senderProfile = userProfiles[senderUid];
-
-    // 🖼️ Profile pic logic (match user list)
-    let picNum = parseInt(senderProfile.pic);
-    if (isNaN(picNum) || picNum <= 0 || picNum > profilePics.length) {
-      picNum = 1; // default to 1
-    }
-    const senderPic = profilePics[picNum - 0];
-
-    const senderName = senderProfile.displayName || "Unknown";
-
-    // Format timestamp to MM/DD/YYYY hh:mm AM/PM
-    let timestamp = "";
-    if (msgData.timestamp) {
-      const date = new Date(msgData.timestamp);
-      const month = (date.getMonth() + 1).toString().padStart(2, "0");
-      const day = date.getDate().toString().padStart(2, "0");
-      const year = date.getFullYear();
-      let hours = date.getHours();
-      const minutes = date.getMinutes().toString().padStart(2, "0");
-      const ampm = hours >= 12 ? "PM" : "AM";
-      hours = hours % 12;
-      hours = hours ? hours : 12; // 0 => 12
-      timestamp = `${month}/${day}/${year} ${hours}:${minutes} ${ampm}`;
-    }
-
-    const isPartner = senderUid === secondUid;
-
-    // Build message container
-    const msgDiv = document.createElement("div");
-    msgDiv.className = "message";
-    msgDiv.style.flexDirection = isPartner ? "row" : "row-reverse";
-    msgDiv.style.background = isPartner ? "#1e1e1e" : "#2b2b2b";
-
-    const img = document.createElement("img");
-    img.src = senderPic;
-    img.alt = "User Pic";
-
-    const content = document.createElement("div");
-    content.className = "msg-content";
-    content.style.textAlign = isPartner ? "left" : "right";
-
-    const header = document.createElement("div");
-    header.className = "msg-header";
-    header.innerHTML = `<span>${senderName}</span><span>${timestamp}</span>`;
-
-    const text = document.createElement("div");
-    text.className = "msg-text";
-    text.textContent = msgData.text || "(no text)";
-
-    content.appendChild(header);
-    content.appendChild(text);
-
-    if (msgData.edited) {
-      const edited = document.createElement("div");
-      edited.className = "msg-edited";
-      edited.textContent = "(edited)";
-      content.appendChild(edited);
-    }
-
-    msgDiv.appendChild(img);
-    msgDiv.appendChild(content);
-    chatMessages.appendChild(msgDiv);
-  }
-}
-
-    deleteChatBtn.onclick = async () => {
-  if (!currentChatPath) return;
-  if (!confirm("Delete this entire private chat and metadata?")) return;
-
-  // Extract uids from currentChatPath: "private/uid/secondUid"
-  const parts = currentChatPath.split("/");
-  const uid = parts[1];
-  const secondUid = parts[2];
-
-  try {
-    // Delete the chat itself
-    await remove(ref(db, `private/${uid}/${secondUid}`));
-
-    // Delete metadata for both users
-    await remove(ref(db, `metadata/${uid}/privateChats/${secondUid}`));
-    await remove(ref(db, `metadata/${secondUid}/privateChats/${uid}`));
-
-    alert("Chat and metadata deleted.");
-    chatView.style.display = "none";
-    privateChatsDiv.style.display = "block";
-    loadPrivateChats();
-  } catch (err) {
-    alert("Error deleting chat: " + err.message);
-  }
-};
-
-
-    backButton.onclick = () => {
-      chatView.style.display = "none";
-      privateChatsDiv.style.display = "block";
-    };
-
-    async function loadUserList() {
-      const usersRef = ref(db, "users");
-      const snapshot = await get(usersRef);
-      if (!snapshot.exists()) {
-        userListDiv.innerHTML = "No users found.";
-        return;
-      }
-
-      const data = snapshot.val();
-      userProfiles = {};
-      const sorted = Object.entries(data).sort((a, b) => {
-        const nameA = a[1]?.profile?.displayName?.toLowerCase() || "";
-        const nameB = b[1]?.profile?.displayName?.toLowerCase() || "";
-        return nameA.localeCompare(nameB);
-      });
-
-      userListDiv.innerHTML = "";
-      sorted.forEach(([uid, info]) => {
-        const name = info.profile?.displayName || uid;
-        let picNum = parseInt(info.profile?.pic);
-
-        // 🟢 Apply same logic for 0/default fallback
-        if (isNaN(picNum) || picNum <= 0 || picNum > profilePics.length) {
-          picNum = 0;
-        }
-
-        const pic = profilePics[picNum + 0];
-        userProfiles[uid] = { displayName: name, pic: picNum.toString() };
-
-        const div = document.createElement("div");
-        div.className = "user-item";
-        div.innerHTML = `<img src="${pic}" width="30" height="30" style="border-radius:50%;vertical-align:middle;margin-right:8px;"> ${name}`;
-        div.onclick = () => editUser(uid, info);
-        userListDiv.appendChild(div);
-      });
-    }
-
-    function editUser(uid, data) {
-      currentUserEditUID = uid;
-      userListDiv.style.display = "none";
-      userEditDiv.style.display = "block";
-      editTitle.textContent = `Editing User: ${uid}`;
-      userDataTextarea.value = JSON.stringify(data, null, 2);
-    }
-
-    saveUserBtn.onclick = async () => {
-      if (!currentUserEditUID) return;
-      try {
-        const newData = JSON.parse(userDataTextarea.value);
-        await set(ref(db, `users/${currentUserEditUID}`), newData);
-        alert("User data saved!");
-        userEditDiv.style.display = "none";
-        userListDiv.style.display = "block";
-        loadUserList();
-      } catch (err) {
-        alert("Invalid JSON or save failed: " + err.message);
-      }
-    };
-
-    backToListBtn.onclick = () => {
-      userEditDiv.style.display = "none";
-      userListDiv.style.display = "block";
-    };
-  </script>
-</body>
+            .message img {
+                width: 42px;
+                height: 42px;
+                border-radius: 50%;
+                object-fit: cover;
+            }
+            .msg-header {
+                color: #aaa;
+                font-size: 0.85em;
+            }
+            textarea, select {
+                background: #1b1b1b !important;
+                border: 1px solid #444 !important;
+                color: #fff !important;
+                border-radius: 6px !important;
+            }
+            ::placeholder {
+                color:grey !important;
+            }
+            .user-item {
+                background: #222;
+                padding: 12px;
+                border-radius: 6px;
+                cursor: pointer;
+                margin-bottom: 12px;
+            }
+            .user-item:hover {
+                background: #333;
+            }
+            .deleteBtn {
+                color:white;
+                background: #333;
+                border:1px solid #444;
+                border-radius: 5px;
+                padding:3px;
+                font-size:0.7em;
+                transition:0.3s all;
+                margin-left:50px;
+            }
+            .deleteBtn:hover {
+                background: #222;
+                border-color: #333;
+                color:grey;
+            }
+            #deleteTypingBtn {
+                background: #7a1f1f;
+            }
+            @media (max-width: 900px) {
+                body {
+                    padding-right: 0;
+                }
+                #right {
+                    width: 100%;
+                    right: -100%;
+                    transition: right 0.35s ease;
+                }
+                #right.open {
+                    right: 0;
+                }
+                #rightToggleBtn {
+                    display: block;
+                    position: fixed;
+                    right: 0;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    background: #2a2a2a;
+                    border: none;
+                    border-radius: 6px 0 0 6px;
+                    padding: 10px 14px;
+                    color: #fff;
+                    cursor: pointer;
+                    z-index: 1000;
+                    transition: background 0.2s;
+                }
+                #rightToggleBtn:hover {
+                    background: #3a3a3a;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <button id="rightToggleBtn">
+            ❮
+        </button>
+        <div id="left">
+            <h2 class="mb-3">
+                Messages Mod View
+            </h2>
+            <div id="typingSection" class="mb-3">
+                <button id="deleteTypingBtn" class="btn btn-danger btn-sm">
+                    Delete Typing Data
+                </button>
+            </div>
+            <div id="mutedUsers">
+                Muted Users
+            </div>
+            <div id="privateChats">
+            </div>
+            <div id="chatView" class="mt-3" style="display:none;">
+                <button id="backButton" class="btn btn-secondary mt-3">
+                    Back
+                </button>
+                <h3 id="chatTitle" class="mb-3">
+                </h3>
+                <div id="chatMessages">
+                </div>
+                <div id="adminControls" class="mt-3">
+                    <label class="form-label text-secondary">
+                        Send As:
+                    </label>
+                    <select id="sendAsSelect" class="form-select mb-2">
+                    </select>
+                    <textarea id="adminMessageInput" class="form-control mb-2" placeholder="Type A Message"></textarea>
+                    <div class="d-flex gap-2">
+                        <button id="sendAdminMessage" class="btn btn-secondary">
+                            Send
+                        </button>
+                        <button id="deleteChat">
+                            Delete Chat
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div id="right">
+            <h2 class="mb-3" id="userCount">
+                Users
+            </h2>
+            <div id="userList">
+            </div>
+            <div id="userEdit" class="mt-3" style="display:none;">
+                <h3 id="editTitle" class="mb-2">
+                </h3>
+                <textarea id="userData" class="form-control" style="height:300px;"></textarea>
+                <div class="d-flex gap-2 mt-3 flex-wrap">
+                    <button id="saveUser" class="btn btn-secondary">
+                        Save Changes
+                    </button>
+                    <button id="backToList" class="btn btn-secondary">
+                        Back
+                    </button>
+                </div>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js">
+        </script>
+        <script type="module" src="admin.js">
+        </script>
+        <script>
+            const toggleBtn = document.getElementById("rightToggleBtn");
+            const rightPanel = document.getElementById("right");
+            toggleBtn.onclick = () => {
+                if (window.innerWidth <= 900) {
+                    rightPanel.classList.toggle("open");
+                    toggleBtn.textContent = rightPanel.classList.contains("open") ? "❯" : "❮";
+                }
+            };
+        </script>
+    </body>
 </html>
